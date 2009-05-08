@@ -9,7 +9,7 @@ use Carp;
 
 use vars qw( @ISA $VERSION );
 @ISA = qw(URI::_server);
-$VERSION = '0.0200';
+$VERSION = '0.0300';
 
 use overload '@{}' => \&as_array;
 
@@ -215,7 +215,8 @@ sub _is_inet
     my $kernel = shift;
     return unless $kernel;
     return 1 if $kernel =~ /:\d*$/;
-    return 1 if $kernel =~ /^\d+\.\d+\.\d+\.\d+/;
+    return 1 if $kernel =~ /^\[[:0-9a-f]+\]$/i;     # [IPv6]
+    return 1 if $kernel =~ /^\d+\.\d+\.\d+\.\d+/;   # IPv4 dotted quad
     return 1 if $kernel =~ /^[-\w.]+$/ and $kernel =~ /[.]/;
 }
 
@@ -223,6 +224,7 @@ sub canonical
 {
     my( $self ) = @_;
     my $other = $self->URI::_generic::canonical();
+
 
     my $kernel = $self->kernel;
     if( _is_inet( $kernel ) ) {
@@ -240,24 +242,20 @@ sub canonical
         $$other =~ s(poe:/)(poe:);        
     }
 
+    my @seg = $other->path_segments;
+    if( 2 < @seg ) {
+        $other = $other->clone if $other == $self;
+        $other->path_segments( @seg );   # enforce 2 segments
+    }
+
     return $other;
 }
 
 ##############################################
-sub query
-{
-    croak "->query() currently not supported";
-}
-
-sub query_form
-{
-    croak "->query_form() currently not supported";
-}
-
 sub fragment
 {
+    return if 1==@_;
     croak "->fragment() currently not supported";
-
 }
 
 ##############################################
@@ -272,9 +270,55 @@ sub as_array
     if( $kernel and ( not $kid or $kernel ne $kid ) ) {
         $alias = join '/', $self->scheme.':/', $kernel, $alias;
     }
-    return [ $alias, $self->event ] unless wantarray;
-    return $alias, $self->event;
+
+    my @ret = ( $alias, $self->event, $self->argument );
+
+    return \@ret unless wantarray;
+    return @ret;
 }
+
+##############################################
+sub argument
+{
+    my $self = shift;
+    my $old = $self->_argument;
+    if( @_ ) {
+        if( 1==@_ ) {
+            my $new = shift;
+            unless( ref $new ) {
+                $self->query( $new );
+            }
+            elsif( 'ARRAY' eq ref $new ) {
+                $self->query_keywords( $new );
+            }
+            else {
+                $self->query_form( $new );
+            }
+        }
+        else {
+            $self->query_form( @_ );
+        }
+    }
+    return unless defined $old;
+    return $old;
+}
+
+sub _argument
+{
+    my $self = shift;
+    my $args;
+
+    my $q = $self->query;
+    return unless defined $q;
+
+    if( $q =~ /=/ ) {
+        return { map { s/\+/ /g; uri_unescape($_) }
+                 map { /=/ ? split(/=/, $_, 2) : ($_ => '')} 
+                 split(/&/, $q)
+               };
+    }
+    return [ map { uri_unescape($_) } split(/\+/, $q, -1) ];
+} 
 
 ##############################################
 sub abs
@@ -384,9 +428,29 @@ The canonical forms of POE URIs are:
     poe://kernel/session/
     poe://kernel/session/event
 
-Event parameters (->query) are not currently supported.
+Events may also have parameters :
+
+    poe:event?foo=bar
+    poe:event?b+20+BINGO
+
+See L</argument> below.
 
 URI fragements (the bits after C<#>) make no sense.
+
+
+=head2 Use
+
+This module attempts to have no pre-conception on how the URIs would be
+used.  Core POE has way of turning URIs into event invocations.  However,
+you may use L</as_array> to invoke the event referenced by a URI.
+
+    $poe_kernel->post( @$uri );
+
+The presence of a kernel name in the URI presuposes some form of
+inter-kernel communication.  L<POE::Component::IKC> doesn't currently
+support URIs, beyond the fact that a subscribed remote session will have a
+local thunk session with the alias of the form I<poe://kernel/session>.  So
+using L</as_array> will be able to access it.
 
 
 =head1 METHODS
@@ -416,9 +480,12 @@ To clear the event name, use C<''> or C<undef>, which are equivalent
     my $kernel = $uri->kernel;
     $old = $uri->kernel( $name );
 
-Sets and returns the kernel part of the $uri.  A kernel may be host:port,
-host (IKC), path to unix socket (IKC) or a local or remote kernel ID or
-alias.
+Sets and returns the kernel part of the $uri.  
+A kernel may be a dotted quad IPv4 address (I<127.0.0.1>), an IPv6 address
+(I<[::1]>) or a hostname (I<localhost.localdomain>) followed by a port number.
+A kernel may also be kernel ID or alias.
+
+The kernel only make sense when using IKC.
 
 To clear the kernel name, use C<''> or C<undef>, which are equivalent.
 
@@ -442,6 +509,19 @@ host name, then it becomes one.
 
 The default POE port is 603 which is POE upside-down and backwards.  Almost.
 
+
+=head2 argument
+
+    $arg = $uri->argument
+    $old = $uri->argument( $new_arg );
+    $old = $uri->argument( %new_arg );
+    $old = $uri->argument( \@new_arg );
+
+Sets and returns the argument for this $uri.  And argument may be a string,
+a hash (L<URI/query_form>) or an arrayref (L<URI/query_keywords>).
+
+See L</as_array> to see how the argument is passed to the event handler.
+
 =head2 user
 
     $user = $uri->user;
@@ -449,6 +529,8 @@ The default POE port is 603 which is POE upside-down and backwards.  Almost.
 
 Sets and returns the username part of the $uri's L<URI/userinfo>.  If the
 user name contains C<:>, it is escaped.
+
+A user only makes sense in IKC.
 
 =head2 password
 
@@ -464,6 +546,7 @@ issue.  Beware.
 While this method is called I<password>, it works just as well with pass
 phrases.
 
+A password only makes sense in IKC.
 
 =head2 as_array
 
@@ -477,6 +560,8 @@ automatically by overloading.
 If a kernel name is present, and it is not the local kernel ID, then it is
 prepended to the session name.  This is compatible with IKC after
 subscribing to the remote session.
+
+If an argument is present, it is returned as the last item.  
 
 =head2 canonical
 
@@ -506,7 +591,7 @@ that make up the path.  See L<URI/path_segments> for more details.
 
 =head1 SEE ALSO
 
-L<POE>, L<URI>.
+L<POE>, L<URI>, L<http://www.faqs.org/rfcs/rfc3986.html>.
 
 =head1 AUTHOR
 
@@ -515,7 +600,7 @@ Philip Gwyn, E<lt>gwyn -at- cpan.orgE<gt>
 =head1 COPYRIGHT AND LICENSE
 
 Some of this code is based on C<URI> and related subclasses was developed by
-Gisle Aas.
+Gisle Aas et al.
 
 
 Copyright (C) 2009 by Philip Gwyn

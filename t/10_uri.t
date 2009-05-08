@@ -3,7 +3,7 @@
 use strict;
 use warnings;
 
-use Test::More tests => 49;
+use Test::More tests => 51;
 BEGIN { use_ok('POEx::URI') };
 
 use URI;
@@ -130,3 +130,10 @@ is_deeply( [ $uri->path_segments ],
 $uri->event( 'foo/bar' );
 is( $uri, "poe://hello.world.com/I'm%2Fa%2Fproblem/foo%2Fbar", 
         "Slash in event" );
+
+##
+$uri->path( "/foo/bar/baz" );
+is( $uri, "poe://hello.world.com/foo%2Fbar/baz", "Slash in session" );
+
+$uri = URI->new( "poe:/foo/bar/baz" )->canonical;
+is( $uri, "poe:foo%2Fbar/baz", "Canonical" );

@@ -1,8 +1,8 @@
 --- #YAML:1.0
 name:                POEx-URI
-version:             0.0200
+version:             0.0300
 abstract:            URI extension for POE event specfiers
-license:             1
+license:             perl
 generated_by:        ExtUtils::MakeMaker version 6.36
 distribution_type:   module
 requires:     
@@ -11,4 +11,4 @@ meta-spec:
     url:     http://module-build.sourceforge.net/META-spec-v1.2.html
     version: 1.2
 author:
-    - Philip Gwyn <fil@localdomain>
+    - Philip Gwyn <gwyn -at- cpan.org>
