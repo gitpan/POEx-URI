@@ -9,9 +9,10 @@ use Carp;
 
 use vars qw( @ISA $VERSION );
 @ISA = qw(URI::_server);
-$VERSION = '0.0300';
+$VERSION = '0.0301';
 
-use overload '@{}' => \&as_array;
+use overload '@{}' => \&as_array, 
+    fallback => 1;
 
 ##############################################
 sub _init
